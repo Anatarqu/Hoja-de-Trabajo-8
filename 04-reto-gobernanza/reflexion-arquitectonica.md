@@ -3,14 +3,14 @@
 
 ## Reto 3: Reflexión Arquitectónica
 
-### 1. Sin Dapr: ¿dónde vive el código de TTL y consumer group?
+### 1. **Comparación de enfoques:** En una arquitectura sin Dapr usando el SDK de Kafka directamente, ¿dónde estaría el código que gestiona el TTL? ¿Y el consumer group? ¿Quién sería responsable de mantenerlo (el equipo de la app o el equipo de plataforma)?
 
-> _Tu respuesta aquí_
+> _Sin Dapr, el TTL y el consumer group estarían dentro del código de cada aplicación. El TTL se manejaría en el producer, además, el consumer tendría que descartar los mensajes vencidos. El consumer group se definiría en la configuración del cliente Kafka del consumer (group.id), y la lógica para separarlo por tenant también estaría en el código. El responsable de mantenerlo sería el equipo de la aplicación, que tendría que repetir esa lógica en cada servicio y lenguaje, y actualizarla si cambia el SDK o el broker. Con Dapr, en cambio, ambas cosas quedan declaradas en el YAML del componente, y las gestiona el equipo de plataforma de forma centralizada, sin tocar el código de negocio._
 
-### 2. El patrón sidecar como frontera de responsabilidad
+### 2. **El patrón sidecar como frontera de responsabilidad:** La decisión de usar `ttlInSeconds=120` es una decisión de negocio (las órdenes expiran en 2 minutos) pero se implementa en la capa de infraestructura (el Component YAML). ¿Cómo distribuirías esta responsabilidad entre el equipo de producto (que conoce el SLA de expiración) y el equipo de plataforma (que gestiona el broker)?
 
-> _Tu respuesta aquí_
+> _Separaría el qué? del cómo?. El equipo de producto define el requisito de negocio, por ejemplo que las órdenes no procesadas en 2 minutos ya no son válidas, y lo deja documentado como parte del contrato del servicio o del SLA. El equipo de plataforma traduce ese requisito a configuración, es decir, ttlInSeconds: 120 en el component, y es dueño del broker, de los manifiestos y de cómo se aplican en cada ambiente. Para que funcione en la práctica, el YAML del componente se guarda en Git y los cambios se hacen por pull request bajo un flujo GitOps: producto puede proponer el nuevo valor del TTL, plataforma lo revisa, valida que el broker lo soporte y lo despliega. Así, el producto controla la regla de negocio sin tocar infraestructura, plataforma mantiene el control técnico, y el código de la aplicación no cambia._
 
-### 3. Limitaciones de la abstracción: ¿migración 100% transparente?
+### 3. **Limitaciones del patrón:** Dapr es agnóstico al broker, pero ¿significa eso que puedes migrar de Redis a Kafka sin *ningún* cambio? Investiga si hay diferencias entre los brokers en cuanto a soporte de TTL y consumer groups, y documenta al menos una limitación concreta de la abstracción.
 
-> _Tu respuesta aquí_
+> _No, la migración no es completamente transparente. El código de la aplicación no cambia, pero el componente sí, y además el comportamiento puede variar entre brokers. Una limitación concreta es el TTL. Redis no tiene expiración nativa por mensaje en Streams, y Kafka tampoco, ya que solo maneja retención por tópico con retention.ms. Para esos brokers, Dapr emula el TTL: el sidecar marca el mensaje con una fecha de expiración y lo descarta al entregarlo si ya venció. En otros brokers, como Azure Service o RabbitMQ, el TTL lo aplica el propio broker de forma nativa, por eso, en Kafka, un mensaje “expirado” sigue ocupando espacio en el tópico hasta que se cumpla la retención, y otros consumidores que no usen Dapr lo seguirían viendo._
